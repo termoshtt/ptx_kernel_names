@@ -9,6 +9,7 @@ extern crate failure;
 use llvm_sys::bit_reader::*;
 use llvm_sys::core::*;
 use llvm_sys::prelude::*;
+use llvm_sys::LLVMLinkage;
 
 use failure::err_msg;
 use std::ffi::*;
@@ -55,10 +56,11 @@ impl MemoryBuffer {
     }
 }
 
+#[derive(Debug)]
 struct Module(LLVMModuleRef);
-struct FuncIter {
-    cur: LLVMValueRef,
-}
+
+#[derive(Debug)]
+struct Function(LLVMValueRef);
 
 impl Module {
     fn parse_bitcode(buf: &MemoryBuffer) -> Result<Self> {
@@ -70,23 +72,33 @@ impl Module {
         Ok(Module(md))
     }
 
-    fn func_iter(&self) -> FuncIter {
-        FuncIter {
-            cur: unsafe { LLVMGetFirstFunction(self.0) },
+    fn functions(&self) -> Vec<Function> {
+        let mut funcs = Vec::new();
+        let mut f = unsafe { LLVMGetFirstFunction(self.0) };
+        while f != null_mut() {
+            funcs.push(Function(f));
+            f = unsafe { LLVMGetNextFunction(f) };
         }
+        funcs
     }
 }
 
-impl Iterator for FuncIter {
-    type Item = LLVMValueRef;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cur != null_mut() {
-            let cur = self.cur;
-            self.cur = unsafe { LLVMGetNextFunction(self.cur) };
-            Some(cur)
-        } else {
-            None
-        }
+impl Function {
+    fn name(&self) -> String {
+        let name = unsafe { CString::from_raw(LLVMGetValueName(self.0) as *mut _) };
+        name.into_string().expect("Fail to parse function name")
+    }
+
+    fn linkage(&self) -> LLVMLinkage {
+        unsafe { LLVMGetLinkage(self.0) }
+    }
+
+    fn type_of(&self) -> LLVMTypeRef {
+        unsafe { LLVMTypeOf(self.0) }
+    }
+
+    fn call_conv(&self) -> u32 {
+        unsafe { LLVMGetFunctionCallConv(self.0) }
     }
 }
 
@@ -97,8 +109,11 @@ fn main() -> Result<()> {
     let membuf = MemoryBuffer::new(&opt.input)?;
     let md = Module::parse_bitcode(&membuf)?;
 
-    for func in md.func_iter() {
-        println!("Func = {:?}", func);
+    for func in md.functions() {
+        println!("Func       = {}", func.name());
+        println!("Linkage    = {:?}", func.linkage());
+        println!("Type       = {:?}", func.type_of());
+        println!("Call conv  = {:?}", func.call_conv());
     }
     Ok(())
 }
