@@ -9,7 +9,6 @@ extern crate failure;
 use llvm_sys::bit_reader::*;
 use llvm_sys::core::*;
 use llvm_sys::prelude::*;
-use llvm_sys::LLVMLinkage;
 
 use failure::err_msg;
 use std::ffi::*;
@@ -89,16 +88,22 @@ impl Function {
         name.into_string().expect("Fail to parse function name")
     }
 
-    fn linkage(&self) -> LLVMLinkage {
-        unsafe { LLVMGetLinkage(self.0) }
-    }
-
-    fn type_of(&self) -> LLVMTypeRef {
-        unsafe { LLVMTypeOf(self.0) }
-    }
-
     fn call_conv(&self) -> u32 {
         unsafe { LLVMGetFunctionCallConv(self.0) }
+    }
+
+    // See the LLVM call convention list
+    //
+    // - PTX_Kernel = 71
+    // - PTX_Device = 72
+    //
+    // http://llvm.org/doxygen/CallingConv_8h_source.html
+    pub fn is_ptx_kernel(&self) -> bool {
+        self.call_conv() == 71
+    }
+
+    pub fn is_ptx_device_func(&self) -> bool {
+        self.call_conv() == 72
     }
 }
 
@@ -110,10 +115,10 @@ fn main() -> Result<()> {
     let md = Module::parse_bitcode(&membuf)?;
 
     for func in md.functions() {
-        println!("Func       = {}", func.name());
-        println!("Linkage    = {:?}", func.linkage());
-        println!("Type       = {:?}", func.type_of());
-        println!("Call conv  = {:?}", func.call_conv());
+        if func.call_conv() == 71 {
+            println!("Func       = {}", func.name());
+            println!("Call conv  = {:?}", func.call_conv());
+        }
     }
     Ok(())
 }
