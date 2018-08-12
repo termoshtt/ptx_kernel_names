@@ -6,9 +6,11 @@ extern crate llvm_sys;
 extern crate structopt;
 extern crate failure;
 
-use failure::err_msg;
+use llvm_sys::bit_reader::*;
 use llvm_sys::core::*;
 use llvm_sys::prelude::*;
+
+use failure::err_msg;
 use std::ffi::*;
 use std::os::raw::c_char;
 use std::ptr::null_mut;
@@ -53,9 +55,50 @@ impl MemoryBuffer {
     }
 }
 
-fn main() {
+struct Module(LLVMModuleRef);
+struct FuncIter {
+    cur: LLVMValueRef,
+}
+
+impl Module {
+    fn parse_bitcode(buf: &MemoryBuffer) -> Result<Self> {
+        let mut md: LLVMModuleRef = null_mut();
+        let res = unsafe { LLVMParseBitcode2(buf.0, &mut md as *mut _) };
+        if res != 0 {
+            return Err(err_msg("Cannot parse LLVM Bitcode"));
+        }
+        Ok(Module(md))
+    }
+
+    fn func_iter(&self) -> FuncIter {
+        FuncIter {
+            cur: unsafe { LLVMGetFirstFunction(self.0) },
+        }
+    }
+}
+
+impl Iterator for FuncIter {
+    type Item = LLVMValueRef;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur != null_mut() {
+            let cur = self.cur;
+            self.cur = unsafe { LLVMGetNextFunction(self.cur) };
+            Some(cur)
+        } else {
+            None
+        }
+    }
+}
+
+fn main() -> Result<()> {
     let opt = Opt::from_args();
     println!("{:?}", opt);
 
-    let _membuf = MemoryBuffer::new(&opt.input);
+    let membuf = MemoryBuffer::new(&opt.input)?;
+    let md = Module::parse_bitcode(&membuf)?;
+
+    for func in md.func_iter() {
+        println!("Func = {:?}", func);
+    }
+    Ok(())
 }
